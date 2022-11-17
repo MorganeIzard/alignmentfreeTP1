@@ -103,10 +103,7 @@ def main( data_directory : str, k : int):
     filenames = list(files.keys())
 
     for filename in filenames :
-        kmers = []
-        for i in files[filename] :
-            kmers.extend(stream_kmers(i, k))
-        files[filename] = kmers
+        files[filename] = stream_kmers(files[filename][0], k)
 
     for i in range(len(files)):
         for j in range(i+1, len(files)):
