@@ -22,7 +22,7 @@ def stream_kmers(text, k):
 
     for i in range(k):
         kmer = kmer << 2
-        kmer += encore(text[i])
+        kmer += encode(text[i])
 
         rev_kmer += (3 - encode(text[i])) * 2**(2*i)
 
@@ -34,7 +34,7 @@ def stream_kmers(text, k):
         kmer = kmer << 2
         kmer = kmer + encode(text[nucl])
 
-        rev_kmer = reverse_kmer >> 2
+        rev_kmer = rev_kmer >> 2
         rev_kmer += (3 - encode(nucl)) * (2**(2*k))
         list_kmer.append(min(kmer, rev_kmer))
 
@@ -44,3 +44,5 @@ def encode(x) :
     dico = {'A':0, 'C':1, 'T':2, 'G':3}
     if x not in dico.keys() :
         return 0
+    else:
+        return dico[x]
