@@ -28,7 +28,7 @@ def stream_kmers(text, k):
 
     list_kmer.append(min(kmer, rev_kmer))
 
-    mask = (1<<(k-1)*2)-1
+    mask = (1 << (k-1) * 2) - 1
     for nucl in text[k:]:
         kmer = kmer & mask
         kmer = kmer << 2
