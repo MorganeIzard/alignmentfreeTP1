@@ -15,10 +15,18 @@ def kmer2str(val, k):
     return "".join(str_val)
 
 
-def stream_kmers(text, k):
-    list_kmer = []
-    kmer = 0
-    rev_kmer = 0
+def stream_kmers(text : str, k : int) -> list:
+    '''
+    Stream kmers from a text
+    ------------
+    parameters
+    text : a string
+    k : the length of the kmers
+    ------------
+    output
+    a list of kmers
+    '''
+    list_kmer, kmer, rev_kmer = [], 0, 0
 
     for i in range(k):
         kmer = kmer << 2
@@ -28,7 +36,7 @@ def stream_kmers(text, k):
 
     list_kmer.append(min(kmer, rev_kmer))
 
-    mask = (1 << (k-1) * 2) - 1
+    mask = (1<<(k-1)*2)-1
     for nucl in text[k:]:
         kmer = kmer & mask
         kmer = kmer << 2
@@ -40,9 +48,18 @@ def stream_kmers(text, k):
 
     return list_kmer
 
-def encode(x) :
+def encode(x : str) -> int:
+    '''
+    Encode a nucleotide into a number
+    ------------
+    parameter
+    x : a nucleotide
+    ------------
+    output
+    the number corresponding to the nucleotide
+    '''
     dico = {'A':0, 'C':1, 'T':2, 'G':3}
     if x not in dico.keys() :
         return 0
-    else:
+    else :
         return dico[x]
