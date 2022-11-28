@@ -6,14 +6,17 @@
 """
 
 from loading import load_directory
-from kmers import stream_kmers
+from kmers import stream_kmers_ini, stream_kmers
+from alive_progress import alive_bar
 import argparse
+import heapq
 
 parser = argparse.ArgumentParser() # create an argument parser
 parser.add_argument('--dir',   dest='data_directory', type=str, required=True, help='path to the data directory')
 parser.add_argument('--k',   dest='k', type=int, required=True, help='kmer size')
+parser.add_argument('--s',   dest='s', type=int, required=True, help='sketch size')
+parser.add_argument('--key_size',   dest='key_size', type=int, required=True, help='key size')
 args = parser.parse_args() # parse the arguments
-
 
 def similarity(A : int, inter : int, B : int):
     """
@@ -29,7 +32,7 @@ def similarity(A : int, inter : int, B : int):
     the coverage of the intersection on A
     the coverage of the intersection on B
     """    
-    return inter/(A + inter), inter/(B + inter)
+    return inter/(A), inter/(B)
 
 def jaccard(A : int, inter : int, B : int):
     """
@@ -44,9 +47,9 @@ def jaccard(A : int, inter : int, B : int):
     output
     jaccard index
     """
-    return inter/(A + inter + B)
+    return inter/(A - inter + B)
 
-def intersection(kmers_A : list, kmers_B : list):
+def intersection(kmers_A : list, kmers_B : list, bar) -> int:
     '''
     Return the number of kmers in common between A and B
     ------------
@@ -65,6 +68,7 @@ def intersection(kmers_A : list, kmers_B : list):
 
     # create a dictionary with the kmers as keys and the number of occurences as values
     for kmer in kmers_A:
+        bar()
         if kmer not in dico1:
             dico1[kmer] = 1
         else:
@@ -72,6 +76,7 @@ def intersection(kmers_A : list, kmers_B : list):
     
     # seek if there is a kmer in kmers_B that is also in kmers_A
     for kmer in kmers_B:
+        bar()
         if kmer in dico1:
             inter_kmers.add(kmer)
             # if the kmer is also present add the number of occurences to the value
@@ -87,7 +92,90 @@ def intersection(kmers_A : list, kmers_B : list):
 
     return inter
 
-def main( data_directory : str, k : int):
+def hash_function(x : int) -> int:
+    '''
+    Hash function
+    ------------
+    parameter
+    x : a kmer value
+    ------------
+    output
+    the hash value of the kmer
+    '''
+    x ^= x << 13 # xor shift left 13 bits
+    x ^= x >> 7 # xor shift right 7 bits
+    x ^= x << 17 # xor shift left 17 bits
+    return x 
+
+def s_plus_petits(seq : str, k : int, s : int) -> list:
+    '''
+    Return the s smallest hash values of the kmers of a sequence
+    ------------
+    parameters
+    seq : a sequence
+    k : the size of the kmers
+    s : the number of smallest hash values to return
+    ------------
+    output
+    L : a list of the s smallest hash values
+    '''
+    L = [2**64-1] # initialize the list with the maximum value of a 64 bits integer
+    for kmer, rkmer in stream_kmers(seq, k): # stream the kmers of the sequence
+        Kmer = min(kmer, rkmer) # take the smallest kmer between the kmer and its reverse complement
+        min_value = heapq.heappop(L) # pop the maximum value of the list
+
+        # if the hash value of the kmer is smaller than the maximum value
+        if hash_function(Kmer) < min_value: 
+            if len(L) < s : # if the list is not full
+                heapq.heappush(L, hash_function(Kmer)) # push the hash value of the kmer in the list
+            else: # if the list is full
+                heapq.heappushpop(L, hash_function(Kmer)) # push the hash value of the kmer in the list and pop the maximum value
+        else : # if the hash value of the kmer is greater than the maximum value
+            heapq.heappush(L, min_value) # push the maximum value in the list
+
+    return L
+
+def s_plus_petits_casiers(seq : str, k : int, s : int, key_size : int, bar) -> list:
+    '''
+    Return the s smallest hash values of the kmers of a sequence using the hash function with casiers
+    ------------
+    parameters
+    seq : a sequence
+    k : the size of the kmers
+    s : the number of smallest hash values to return
+    key_size : the size of the hash values
+    ------------
+    output
+    L : a list of the s smallest hash values
+    '''
+    L = [[2**64-1] for k in range(2**key_size)] # create a list of s lists of size 2**key_size filled with 2**64-1 
+
+    for kmer, rkmer in stream_kmers(seq, k): # iterate over the kmers of the sequence
+        Kmer = hash_function(min(kmer, rkmer)) # take the smallest kmer
+        key = int( Kmer & int(f"0b{ '1' * key_size}", 2)) # take the key_size least significant bits of the kmer
+        tail = Kmer >> key_size # take the rest of the kmer
+        min_value = heapq.heappop(L[key]) # take the smallest value of the list corresponding to the key
+        
+        # if the hash value of the kmer is smaller than the smallest value of the list
+        if tail < min_value:
+            if len(L[key]) < s/2**key_size - 1: # if the list is not full
+                L[key].append(tail) # append the hash value of the kmer in the list
+            elif len(L[key]) == s/2**key_size - 1:
+                L[key].append(tail) # append the hash value of the kmer in the list
+                heapq.heapify(L[key]) # heapify the list
+            else: # if the list is full
+                heapq.heappushpop(L[key], tail) # add the hash value of the tail to the list and remove the smallest value
+        else : # if the hash value of the tail is not smaller than the smallest value
+            heapq.heappush(L[key], min_value) # add the smallest value to the list
+
+        bar()
+    # flatten the list of lists
+    list_s_min_kmers = [ [  int(f"0b{bin(tail)[2:]}{bin(key)[2:].zfill(key_size)}" ,2) for tail in L[key]] for key in range(len(L)) ]
+    list_s_min_kmers  = [item for sublist in list_s_min_kmers for item in sublist]
+
+    return list_s_min_kmers
+
+def main( data_directory : str, k : int , s : int, key_size : int):
     '''
     Compare the similarity between all the sequences in a directory
     ------------
@@ -99,18 +187,38 @@ def main( data_directory : str, k : int):
     print the similarity between all the sequences
     '''
 
-    files = load_directory(data_directory)    
+    files, files_2 = load_directory(data_directory), load_directory(data_directory)
     filenames = list(files.keys())
 
     for filename in filenames :
-        files[filename] = stream_kmers(files[filename][0], k)
+        with alive_bar((len(files[filename][0])-k+1)*2, ctrl_c=True, title=f"{filename}\t") as bar1: # create a progress bar
+            files[filename] = s_plus_petits_casiers(files[filename][0], k, s, key_size, bar1)
+            files_2[filename] = stream_kmers_ini(files_2[filename][0], k, bar1)
 
     for i in range(len(files)):
         for j in range(i+1, len(files)):
-            A, inter, B = files[filenames[i]], intersection(files[filenames[i]], files[filenames[j]]), files[filenames[j]]
-            print(filenames[i], filenames[j], jaccard(len(A)-inter, inter, len(B)-inter), similarity(len(A)-inter, inter, len(B)-inter))
+            name1, name2 = '_'.join(filenames[i].split('_')[:2]), '_'.join(filenames[j].split('_')[:2])
+            with alive_bar(len(files[filenames[i]]) + len(files_2[filenames[i]]) + len(files[filenames[j]]) + len(files_2[filenames[j]]), ctrl_c=True, title=f"{name1} x {name2}\t") as bar2:
+                A, inter, B = files[filenames[i]], intersection(files[filenames[i]], files[filenames[j]], bar2), files[filenames[j]]
+                A1, inter1, B1 = files_2[filenames[i]], intersection(files_2[filenames[i]], files_2[filenames[j]], bar2), files_2[filenames[j]]
+            
+            print('\t' + name1 + ' with sketch : ' 
+                + str(round((similarity(len(A1), inter, len(B1))[0])*100,5)) 
+                + ' % covered\n\t' + name2 + ' with sketch : ' 
+                +  str(round((similarity(len(A1), inter, len(B1))[1])*100,5)) + ' % covered')
+            print('\t' + name1 + ' without sketch : ' 
+                + str(round((similarity(len(A1), inter1, len(B1))[0])*100,5)) 
+                + ' % covered\n\t' + name2 + ' without sketch : ' 
+                +  str(round((similarity(len(A1), inter1, len(B1))[1])*100,5)) + ' % covered')
+            
+            print('\tJaccard index with sketch : ' + str(round(jaccard(len(A), inter, len(B)),5)))            
+            print('\tJaccard index without sketch : ' + str(round(jaccard(len(A1), inter1, len(B1)),5)))
+
+            print('\tSketch efficiency : ' + str(round(round(jaccard(len(A), inter, len(B)),5)*100/round(jaccard(len(A1), inter1, len(B1)),5),2)) + ' %')
 
 if __name__ == "__main__":
     data_directory = args.data_directory
     k = args.k
-    main( data_directory, k)
+    s = args.s
+    key_size = args.key_size
+    main( data_directory, k, s, key_size)
